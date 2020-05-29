@@ -1,0 +1,401 @@
+ const resetEmail = req.body.email;
+
+    const user = await User.findOne({email : resetEmail});
+
+    if(!user){
+        return next(new CustomError("Email Couldnt Found",400));
+    }
+
+    const resetPasswordToken = user.getResetPasswordTokenFromUser();
+
+    await user.save();
+
+    const resetPasswordUrl = `http://localhost:4000/api/auth/resetpassword?resetPasswordToken=${resetPasswordToken}`;
+
+    const emailTemplate = `
+        <h3>RESET YOUR PASSWORD</h3>
+
+        <p>This <a href = '${resetPasswordUrl}' target = '_blank'>link will expire in 1 hour</a></p>
+    
+    `;
+
+        try{
+            await sendEmail({
+                from : process.env.SMTP_USER,
+                to : resetEmail,
+                subject : "Reset Your Password",
+                html : emailTemplate
+            });
+            return res
+            .status(200)
+            .json({
+            succes : true,
+            message : "Token Sent To Your Email"
+        })
+    }
+    catch (err){
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpire = undefined;
+
+        await user.save();
+
+        return next(new CustomError("Email Could Not Be Send",500));
+    }
+
+
+
+
+
+
+
+***************RESET PASSWORD TOKEN********************
+
+
+UserSchema.methods.getResetPasswordTokenFromUser = function(){
+    const randomHexByte = crypto.randomBytes(15).toString("hex");
+
+    const {RESET_PASSWORD_EXPIRE} = process.env;
+
+    const resetPasswordToken = crypto.createHash("SHA256").update(randomHexByte).digest("hex");
+
+    this.resetPasswordToken = resetPasswordToken;
+    this.resetPasswordExpire = Date.now() + parseInt(RESET_PASSWORD_EXPIRE);
+
+    return resetPasswordToken;
+
+
+}
+
+
+
+
+**************************Node Mailer****************************
+const nodemailer = require("nodemailer");
+
+const sendEmail = async(mailOptions) => {
+    let transporter = nodemailer.createTransport({
+        host : process.env.SMTP_HOST,
+        port : process.env.SMTP_PORT,
+        auth : {
+            user : process.env.SMTP_USER,
+            pass : process.env.SMTP_PASS
+        }
+
+    });
+    let info = await transporter.sendMail(mailOptions);
+    console.log(`Message Sent : ${info.messageId}`);
+};
+
+module.exports = sendEmail;
+
+********************Upload Image***********************
+app.use(express.static(path.join(__dirname,"public")));
+
+****************Multer************************
+
+const multer = require("multer");
+const path = require("path");
+const CustomError = require("../../helpers/error/CustomError");
+
+//Storage , FileFilter
+
+//Storage
+
+const storage = multer.diskStorage({
+    destination : function(req,file,cb){
+
+        const rootDir = path.dirname(require.main.filename);
+
+        cb(null,path.join(rootDir,"/public/uploads"));
+
+
+
+    },
+
+    filename : function(req,file,cb){
+        //File - Mimetype - image/png-jpg-gif
+
+        const extension = file.mimetype.split("/")[1];
+
+        req.savedProfileImage = "image_" + req.user.id + "." + extension; //req.user.id getAccessToRoute Da oluşuyo
+
+        cb(null,req.savedProfileImage);
+    }
+});
+
+//File Filter
+
+const fileFilter = (req,file,cb) => {
+    let allowedMimeType = ["image/jpg","image/gif","image/jpeg","image/png"];
+
+    if(!allowedMimeType.includes(file.mimetype)){
+        return cb(new CustomError("Please Provide A Valid Image File",400),false);
+    }
+    return cb(null,true);
+};
+
+const profileImageUpload = multer({storage,fileFilter});
+
+
+module.exports = profileImageUpload;
+
+
+*****************Auth Router**********************
+
+router.post("/upload",[getAccessToRoute,profileImageUpload.single("profile_image")],imageUpload);
+
+********************Auth Controller*********************
+
+const imageUpload = asyncErrorWraper(async (req,res,next) => {
+    //Image Upload Sccess
+
+    const user = await User.findByIdAndUpdate(req.user.id,{
+        "profileimg" : req.savedProfileImage
+    },{
+        new : true,
+        runValidators : true
+    })
+
+    res
+    .status(200)
+    .json({
+        succes : true,
+        message : "Upload Success",
+        data : user
+    })
+})
+
+
+********************Query Helper*****************
+
+//const asyncErrorWraper = require("express-async-handler");
+
+const searchHelper = (searchKey,query,req) => {
+    
+    if(req.query.search){
+        //searchObject içine neye göre nasıl arama yapıldığını alıcak
+        const searchObject = {};
+        //Aramayı Düzeltiyoruz
+        const regex = new RegExp(req.query.search,"i");
+        //searchObjectimize neye göre neyi neyi araması gerektiğini söylüyoruz
+        searchObject[searchKey] = regex;
+        //Sonra gelen query objemize göre searchObjectimizi parametre olarak veriyoruz ve döndürüyoruz
+        return query = query.where(searchObject);
+    }
+    //Eğer Arama Verilmemişse Default Değer Olarak Döndürüyoruz
+    return query;
+
+}
+
+const populateHelper = (query,population) => {
+    return query.populate(population);
+}
+
+const questionSortHelper = (query,req) => {
+    const sortKey = req.query.sortBy;
+
+    if(sortKey === "most-answered"){
+        return query.sort("-answerCount");
+    }
+    if(sortKey === "most-liked"){
+        return query.sort("-likeCount");
+    }
+
+    return query.sort("-createdAt");
+  
+}
+
+const paginationHelper = async (totalDocuments,query,req) => {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 5;
+
+    const startIndex = (page - 1) * limit;
+    const endIndex = page * limit;
+
+    const pagination = {};
+    const total = totalDocuments
+
+    if(startIndex > 0) {
+        pagination.previous = {
+            page : page + 1,
+            limit : limit
+
+        }
+    } 
+
+    if(endIndex < total) {
+        pagination.next = {
+            page : page - 1,
+            limit : limit
+        }
+    }
+
+    return {
+        query : query === undefined ? undefined : query.skip(startIndex).limit(limit),
+        pagination : pagination,startIndex,limit
+    }
+
+    
+}
+
+
+module.exports = {
+    searchHelper,
+    populateHelper,
+    questionSortHelper,
+    paginationHelper
+};
+
+
+********************Discusion Query*********************
+
+const asyncErrorWraper = require("express-async-handler");
+const {populateHelper,searchHelper,questionSortHelper,paginationHelper} = require("./queryMiddlewareHelpers");
+
+
+const questionQueryMiddleware = function(model,options){
+
+    return asyncErrorWraper(async function(req,res,next){
+        //Initial Query
+
+        let query = model.find();
+
+        //Search
+
+        query = searchHelper("title",query,req)
+
+        if(options && options.population){
+            query = populateHelper(query,options.population);
+        }
+        
+        //Sort
+
+        query = questionSortHelper(query,req);
+
+        //Pagination
+        const total = await model.countDocuments();
+
+        const paginationResult = await paginationHelper(total,query,req);
+
+        query = paginationResult.query;
+
+        const pagination = paginationResult.pagination;
+
+        //RUN THAT QUERY BOIIIII !!!!
+
+        const queryResults = await query;
+
+        res.queryResults = {
+            success : true,
+            count : queryResults.length,
+            pagination : pagination,
+            data : queryResults
+        }
+
+        next();
+
+    })
+
+}
+
+
+module.exports = questionQueryMiddleware;
+
+
+**************Idea Query********************
+
+const asyncErrorWraper = require("express-async-handler");
+const {populateHelper,paginationHelper} = require("./queryMiddlewareHelpers");
+
+const answerQueryMiddleware = function(model,options){
+
+    return asyncErrorWraper(async function(req,res,next){
+    
+       const {id} = req.params;
+
+       const arrayName = "answers";
+
+       const total = (await model.findById(id))["answerCount"];
+
+       const paginationResult = await paginationHelper(total,undefined,req);
+
+       const startIndex = paginationResult.startIndex;
+       const limit = paginationResult.limit;
+
+       let queryObject = {};
+
+       queryObject[arrayName] = {$slice : [startIndex,limit]};
+
+       let query = model.find({_id : id},queryObject);
+
+       query = populateHelper(query,options.population);
+
+       const queryResults = await query;
+
+        res
+        .queryResults = {
+            succes : true,
+            pagination : paginationResult.pagination,
+            data : query
+        }
+
+        next();
+
+    })
+
+}
+
+
+module.exports = answerQueryMiddleware;
+
+
+**********************User Query********************
+
+const asyncErrorWraper = require("express-async-handler");
+const {searchHelper,paginationHelper} = require("./queryMiddlewareHelpers");
+
+const userQueryMiddleware = function(model,options){
+
+    return asyncErrorWraper(async function(req,res,next){
+    
+        let query = model.find();
+
+        //Search by name
+
+        query = searchHelper("name",query,req);
+        const total = await model.countDocuments();
+        const paginationResult = await paginationHelper(total,query,req);
+
+        query = paginationResult.query;
+        pagination = paginationResult.pagination;
+
+        const queryResults = await query;
+
+        res.queryResults = {
+            succsess : true,
+            pagination : pagination,
+            count : queryResults.length,
+            data : queryResults
+        }
+
+        next();
+
+    })
+
+}
+
+
+module.exports = userQueryMiddleware;
+
+
+
+ÖNEMLİ NOT : 
+SLUGIFY Test Edilmedi 
+Image Upload Refactor İstiyor Kısaca Çalışmıyo
+Query Denenmedi Optionları Routerlarda Göndermen Gerek
+Birde Reset Password Ve Forgot Passwordü Ayır 
+
+
+
+
+    

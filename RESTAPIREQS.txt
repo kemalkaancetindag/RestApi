@@ -1,0 +1,122 @@
+Schemas: 
+	-User
+	-Discusion
+	-Idea
+
+UserSchema: 
+	-name
+	-password
+	-email
+	-profile image
+	-discusions ---> discusion_id
+	-idea ---> idea_id
+	-info
+	-user_votes
+
+DiscusionSchema: 
+	-Title
+	-About
+	-Description
+	-Ideas ---> idea_id
+	-user_id ---> user_id
+	-up_votes
+	-down_votes
+
+IdeaSchema: 
+	-content
+	-title
+	-user_id
+	-discusion_id
+	-up_votes
+	-down_votes
+
+
+Routes:
+	Main Routes:
+		- "/discusions" ---> All Discusions Main Page
+
+	Auth Routes:
+		- "/auth/login" ---> Login Page
+		- "/auth/register" ---> Register Page
+		- "/auth/forgot_password" ---> Forgot Password Page
+
+	
+			OK{
+			Discusion Routes:
+				- "/new_discusion" ---> Add New Discussion
+				
+				- "/discusion_id" ---> Specific Discusion ---> Also Shows All Ideas In Query
+				- "/discusion_id/edit ---> Edit Discusion
+				- "/dicusion_id/delete" ---> Delete Discusion
+			}
+
+	Idea Routes:
+		- "/discusion_id/idea/idea_id" ---> Specific Idea
+		- "/discusion_id/idea" ---> All Ideas
+		- "/discusion_id/idea/add_new_idea" ---> Add New Idea
+		- "/discusion_id/idea/idea_id/edit" ---> Edit Idea
+		- "/discusion_id/idea/idea_id/delete" ---> Delete Idea
+	User Routes: 
+		- "/user_id/profile" ---> Own Profile
+		- "/user_id" ---> Someone Elses Fucking Profile (Why We Need That Shit In Website Like That IDK)
+
+		
+TODO AUTH ROUTE 
+
+
+class CustomError extends Error{
+    constructor(message,status){
+        super(message);
+        this.status = status;
+    }
+}
+
+module.exports = CustomError;
+
+
+
+
+
+const CustomError = require("../../helpers/error/CustomError");
+
+const customErrorHandler = (err,req,res,next) => {
+
+    let customError = err;
+    
+
+    if(customError.name === "SyntaxError"){
+        customError = new CustomError("Un Expected Syntax",400);
+    }
+    if(customError.name === "ValidationError"){
+        customError = new CustomError(customError.message,400);
+    }
+    if(customError.code == 11000){
+        //Duplicate Key Error
+        customError = new CustomError("Email Already Exist Try Different",400);
+    }
+
+    
+    res
+    .status(customError.status || 500)
+    .json({
+        success : false,
+        message : customError.message 
+    });
+};
+
+module.exports = {
+    customErrorHandler
+}
+
+
+
+const isTokenIncluded = (req) => {
+    return req.headers.authorization && req.headers.authorization.startsWith('Bearer:');
+}
+
+const getAccessTokenFromHeader = (req) => {
+    const authorization = req.headers.authorization;
+    const access_token = authorization.split(" ")[1];
+    return access_token;
+}
+	
